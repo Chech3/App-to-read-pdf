@@ -15,3 +15,4 @@ Route::get('/pdfs/{pdf}/annotate', [PdfAnnotatorController::class, 'show'])->nam
 Route::post('/pdfs/{pdf}/annotate', [PdfAnnotatorController::class, 'store'])->name('pdfs.annotate.save');
 
 
+

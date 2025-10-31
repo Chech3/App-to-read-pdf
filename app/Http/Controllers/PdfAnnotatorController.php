@@ -3,34 +3,35 @@
 namespace App\Http\Controllers;
 
 use App\Models\PdfFile;
+use App\Models\WordTag;
 use Illuminate\Http\Request;
 use setasign\Fpdi\Fpdi;
 use Imagick;
 
 class PdfAnnotatorController extends Controller
 {
-  public function show(PdfFile $pdf)
-{
-    $pdfPath = storage_path('app/public/' . $pdf->path);
+    public function show(PdfFile $pdf)
+    {
+        $pdfPath = storage_path('app/public/' . $pdf->path);
 
-    $imagick = new \Imagick();
-    $imagick->setResolution(150, 150);
-    $imagick->readImage($pdfPath);
+        $imagick = new \Imagick();
+        $imagick->setResolution(150, 150);
+        $imagick->readImage($pdfPath);
 
-    $images = [];
-    foreach ($imagick as $i => $page) {
-        $page->setImageFormat("png");
-        $file = 'tmp/pdf_page_'.$pdf->id.'_'.$i.'.png';
-        $fullPath = storage_path('app/public/'.$file);
-        $page->writeImage($fullPath);
-        $images[] = asset('storage/'.$file);
+        $images = [];
+        foreach ($imagick as $i => $page) {
+            $page->setImageFormat("png");
+            $file = 'tmp/pdf_page_' . $pdf->id . '_' . $i . '.png';
+            $fullPath = storage_path('app/public/' . $file);
+            $page->writeImage($fullPath);
+            $images[] = asset('storage/' . $file);
+        }
+
+        return view('pdfs.annotate', [
+            'pdf' => $pdf,
+            'pages' => $images
+        ]);
     }
-    
-    return view('pdfs.annotate', [
-        'pdf' => $pdf,
-        'pages' => $images
-    ]);
-}
 
     public function store(Request $request, PdfFile $pdf)
     {
@@ -70,5 +71,15 @@ class PdfAnnotatorController extends Controller
 
         return response()->json(['success' => true, 'file' => $annotated]);
     }
-    
+
+
+    public function review(PdfFile $pdf)
+    {
+        $tags = WordTag::where('pdf_id', $pdf->id)->get();
+
+        return view('pdfs.review', [
+            'pdf' => $pdf,
+            'tags' => $tags
+        ]);
+    }
 }
