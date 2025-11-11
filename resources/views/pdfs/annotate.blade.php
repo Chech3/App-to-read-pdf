@@ -7,7 +7,9 @@
         <div class="mb-3 d-flex gap-2 align-items-center">
             <a href="{{ route('pdfs.index') }}" class="btn btn-secondary">⬅️ Volver</a>
             <button id="toggleDraw" class="btn btn-primary">✏️ Modo Dibujo</button>
+            <button id="addCompleteStamp" class="btn btn-success">Agregar Sello COMPLETED</button>
             <button id="saveAnnotations" class="btn btn-success">💾 Guardar Anotaciones</button>
+
 
             <button id="btnComplete" class="btn btn-success">✅ COMPLETE</button>
             <button id="btnIncomplete" class="btn btn-danger">❌ INCOMPLETE</button>
@@ -226,6 +228,25 @@
             fc.add(group);
             fc.renderAll();
         }
+        document.getElementById('addCompleteStamp').addEventListener('click', () => {
+            fabricCanvases.forEach((fc) => {
+                const text = new fabric.Text('COMPLETED', {
+                    fontSize: 120,
+                    fill: 'rgba(255,0,0,0.25)',
+                    fontWeight: 'bold',
+                    angle: -45,
+                    originX: 'center',
+                    originY: 'center',
+                    top: fc.height / 2,
+                    left: fc.width / 2,
+                    selectable: false
+                });
+
+                fc.add(text);
+                fc.renderAll();
+            });
+        });
+
 
         // ---- Modo dibujo ----
         document.getElementById('toggleDraw').addEventListener('click', () => {
@@ -254,65 +275,20 @@
                 if (!fc || !pagesMeta[i]) return null;
 
                 const scale = pagesMeta[i].scaleFactor;
-                const tempCanvas = new fabric.Canvas(null, {
-                    width: fc.width / scale,
-                    height: fc.height / scale,
-                });
 
-                fc.getObjects().forEach(obj => {
-                    let clone;
+                // Desactivar selección para evitar artefactos
+                fc.discardActiveObject();
+                fc.renderAll();
 
-                    if (obj.type === "group") {
-                        // Clonar cada objeto dentro del grupo
-                        const clonedObjects = obj._objects.map(innerObj => fabric.util.object
-                            .clone(innerObj));
-                        clone = new fabric.Group(clonedObjects, {
-                            left: obj.left / scale,
-                            top: obj.top / scale,
-                        });
+                // ✅ mantener la escala del PDF pero exportar en alta calidad
+                const exportScale = 3; // Puedes subir a 3 si quieres más calidad
 
-                        // Ajustar tamaño y escala
-                        clone.scaleX = obj.scaleX / scale;
-                        clone.scaleY = obj.scaleY / scale;
-                    } else {
-                        // Clonar objetos normales (dibujo, líneas, etc)
-                        clone = fabric.util.object.clone(obj);
-                        clone.left /= scale;
-                        clone.top /= scale;
-                        clone.scaleX /= scale;
-                        clone.scaleY /= scale;
-                    }
-
-                    clone.setCoords();
-                    tempCanvas.add(clone);
-                });
-
-                tempCanvas.renderAll();
-                // --- EXPORTAR EN ALTA RESOLUCIÓN ---
-                const exportScale = 2; // sube a 3 si quieres más calidad
-
-                // Guardar tamaño original
-                const origWidth = tempCanvas.width;
-                const origHeight = tempCanvas.height;
-
-                // Ajustar para exportar HD
-                tempCanvas.setWidth(origWidth * exportScale);
-                tempCanvas.setHeight(origHeight * exportScale);
-                tempCanvas.setZoom(exportScale);
-
-                // Exportar imagen HD
-                const img = tempCanvas.toDataURL({
+                const data = fc.toDataURL({
                     format: "png",
-                    multiplier: exportScale
+                    multiplier: exportScale / scale // alta resolución sin perder posición
                 });
 
-                // Restaurar tamaño original
-                tempCanvas.setWidth(origWidth);
-                tempCanvas.setHeight(origHeight);
-                tempCanvas.setZoom(1);
-
-                return img;
-
+                return data;
             });
 
             const response = await fetch(saveUrl, {
@@ -380,24 +356,7 @@
             }
         }
 
-        function scrollToMatch(i) {
-            const m = matches[i];
-            const pageDiv = document.getElementById(`page_${m.pageIndex + 1}`);
 
-            // Calcula posición absoluta dentro del contenedor
-            const topPos = pageDiv.offsetTop + m.y - 30; // ajusta -80 para bajar un poco más
-
-            container.scrollTo({
-                top: topPos,
-                behavior: "smooth"
-            });
-
-        }
-
-        function updateCounter() {
-            const el = document.getElementById("matchCounter");
-            el.textContent = matches.length ? `${matches.length} resultado(s)` : "0 resultados";
-        }
 
         // eventos búsqueda
         document.getElementById("btnSearch").addEventListener("click", runSearch);
@@ -409,35 +368,9 @@
             }
         });
 
-        // botones quedan pero no hacen nada
-        document.getElementById("btnPrev").addEventListener("click", prevMatch);
-        document.getElementById("btnNext").addEventListener("click", nextMatch);
 
-        function scrollToMatch(i) {
-            const m = matches[i];
-            const div = document.getElementById(`page_${m.pageIndex+1}`);
-            div.scrollIntoView({
-                behavior: "smooth",
-                block: "center"
-            });
 
-        }
 
-        function nextMatch() {
-            if (!matches.length) return;
-            currentMatchIndex = (currentMatchIndex + 1) % matches.length;
-            runSearch();
-            scrollToMatch(currentMatchIndex);
-            updateCounter();
-        }
-
-        function prevMatch() {
-            if (!matches.length) return;
-            currentMatchIndex = (currentMatchIndex - 1 + matches.length) % matches.length;
-            runSearch();
-            scrollToMatch(currentMatchIndex);
-            updateCounter();
-        }
 
         function updateCounter() {
             const el = document.getElementById("matchCounter");
