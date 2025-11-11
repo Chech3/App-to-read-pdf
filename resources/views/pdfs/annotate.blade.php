@@ -2,16 +2,41 @@
 
 @section('content')
     <div class="container-fluid mt-4">
+        <!-- LOADER: se muestra mientras se renderiza el PDF -->
+        <div id="loadingOverlay"
+            style="
+    position: fixed;
+    top:0;
+    left:0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255,255,255,0.85);
+    z-index: 9999;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    font-size: 22px;
+    font-weight: bold;
+">
+            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;"></div>
+            <span class="mt-3">Cargando PDF...</span>
+        </div>
+        <!-- /LOADER -->
+
         <h2>Anotar PDF: {{ $pdf->name }}</h2>
 
-        <div class="mb-3 d-flex gap-2 align-items-center">
+        <div class="mb-3 d-flex flex-wrap gap-2 align-items-center">
+
             <a href="{{ route('pdfs.index') }}" class="btn btn-secondary">⬅️ Volver</a>
             <button id="toggleDraw" class="btn btn-primary">✏️ Modo Dibujo</button>
             <button id="saveAnnotations" class="btn btn-success">💾 Guardar Anotaciones</button>
 
             <button id="btnComplete" class="btn btn-success">✅ COMPLETE</button>
             <button id="btnIncomplete" class="btn btn-danger">❌ INCOMPLETE</button>
-            <input id="searchText" type="text" class="form-control w-25 ms-3" placeholder="Buscar texto...">
+            <input id="searchText" type="text" class="form-control" style="max-width: 220px"
+                placeholder="Buscar texto...">
+
 
 
 
@@ -52,21 +77,34 @@
 
         // ---- Render PDF ----
         pdfjsLib.getDocument(pdfUrl).promise.then(pdf => {
+            const pagePromises = [];
+
             for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
                 ((pageIndex) => {
-                    pdf.getPage(pageIndex).then(async page => {
+                    // Guardamos la promesa de procesamiento/render de cada página
+                    const p = pdf.getPage(pageIndex).then(async page => {
 
-
-                        const baseViewport = page.getViewport({
+                        const pdfViewport = page.getViewport({
                             scale: 1
-                        });
+                        }); // tamaño real PDF en px ≈ 1pt
                         const containerWidth = container.clientWidth - 40;
-                        const scale = containerWidth / baseViewport.width;
+                        const scale = 1.5
+
+                        const displayViewport = page.getViewport({
+                            scale
+                        }); // para mostrar
+                        page.scaleFactor = scale;
+
+                        // Guardamos medidas reales del PDF
+                        pagesMeta[pageIndex - 1] = {
+                            ...pagesMeta[pageIndex - 1],
+                            pdfWidth: pdfViewport.width,
+                            pdfHeight: pdfViewport.height,
+                        };
+
                         const scaledViewport = page.getViewport({
                             scale
                         });
-                        page.scaleFactor = scale;
-
 
                         const pageWrapper = document.createElement('div');
                         pageWrapper.id = `page_${pageIndex}`;
@@ -77,7 +115,9 @@
                         pageWrapper.style.background = '#fff';
                         pageWrapper.style.boxShadow = '0 0 8px rgba(0,0,0,0.2)';
                         pageWrapper.style.width = scaledViewport.width + 'px';
+
                         container.appendChild(pageWrapper);
+
 
                         // PDF canvas
                         const pdfCanvas = document.createElement('canvas');
@@ -98,9 +138,16 @@
                         const drawCanvas = document.createElement('canvas');
                         drawCanvas.width = scaledViewport.width;
                         drawCanvas.height = scaledViewport.height;
+
+                        // No escalar con context.scale aquí
+                        drawCanvas.style.width = scaledViewport.width + "px";
+                        drawCanvas.style.height = scaledViewport.height + "px";
+                        drawCanvas.getContext('2d').scale(scale, scale);
+
                         drawCanvas.classList.add("overlay-canvas");
                         pageWrapper.appendChild(drawCanvas);
 
+                        // Esperamos a que la página termine de renderizar
                         await page.render({
                             canvasContext: pdfCtx,
                             viewport: scaledViewport
@@ -110,6 +157,9 @@
                             isDrawingMode: drawingEnabled,
                             selection: false,
                         });
+
+                        // Importante: Guardar escala real para usar al exportar
+                        fc.pdfScale = scale;
 
                         fc.on("mouse:down", (opt) => {
                             if (!addMode) return;
@@ -166,15 +216,45 @@
                             scaleFactor: scale,
                         };
                     });
+
+                    pagePromises.push(p);
                 })(pageNum);
             }
+
+            // Cuando todas las promesas de páginas terminen -> ocultar overlay
+            Promise.all(pagePromises)
+                .then(() => {
+                    const loader = document.getElementById("loadingOverlay");
+                    if (loader) loader.style.display = "none";
+                })
+                .catch(err => {
+                    console.error("Error cargando páginas del PDF:", err);
+                    // ocultar loader aunque haya error para no dejar la UI bloqueada
+                    const loader = document.getElementById("loadingOverlay");
+                    if (loader) loader.style.display = "none";
+                    alert("Error al cargar el PDF. Revisa la consola.");
+                });
+        }).catch(err => {
+            console.error("Error al obtener documento PDF:", err);
+            const loader = document.getElementById("loadingOverlay");
+            if (loader) loader.style.display = "none";
+            alert("No se pudo abrir el PDF.");
         });
 
         function addStamp(fc, x, y, text, color) {
 
+
+            let noteText = "";
+
+            // Si es INCOMPLETE, pedir texto al usuario
+            if (text === "INCOMPLETE") {
+                noteText = prompt("Describe qué falta o cuál es el error:");
+                if (!noteText) noteText = "(sin detalles)";
+            }
+
             const rect = new fabric.Rect({
-                width: 120,
-                height: 40,
+                width: 140,
+                height: noteText ? 60 : 40,
                 fill: color,
                 rx: 6,
                 ry: 6,
@@ -190,13 +270,29 @@
                 fontWeight: "bold",
                 originX: "center",
                 originY: "center",
-                top: 0,
+                top: noteText ? -10 : 0,
                 left: 0
             });
 
-            const group = new fabric.Group([rect, label], {
+            let groupObjects = [rect, label];
+
+            if (noteText) {
+                const note = new fabric.Text(noteText, {
+                    fontSize: 20,
+                    fill: "white",
+                    originX: "center",
+                    originY: "center",
+                    top: 15
+                });
+                groupObjects.push(note);
+            }
+
+            const scale = fc.pdfScale;
+            const adjustedY = (fc.height / scale) - y;
+
+            const group = new fabric.Group(groupObjects, {
                 left: x,
-                top: y,
+                top: adjustedY,
                 selectable: true,
                 originX: "center",
                 originY: "center"
@@ -225,14 +321,15 @@
             addMode = "incomplete";
             drawingEnabled = false;
             fabricCanvases.forEach(fc => fc.isDrawingMode = false);
-            alert("Modo: colocar etiqueta INCOMPLETE");
+            alert("Modo: colocar etiqueta INCOMPLETE. Haz clic dónde marcar y te pedirá detalles.");
         });
 
         document.getElementById('saveAnnotations').addEventListener('click', async () => {
             const overlays = fabricCanvases.map((fc, i) => {
                 if (!fc || !pagesMeta[i]) return null;
 
-                const scale = pagesMeta[i].scaleFactor;
+                const scale = fabricCanvases[i].pdfScale;
+
                 const tempCanvas = new fabric.Canvas(null, {
                     width: fc.width / scale,
                     height: fc.height / scale,
@@ -247,19 +344,12 @@
                             .clone(innerObj));
                         clone = new fabric.Group(clonedObjects, {
                             left: obj.left / scale,
-                            top: obj.top / scale,
+                            top: (fc.height / scale) - (obj.top / scale),
                         });
 
                         // Ajustar tamaño y escala
                         clone.scaleX = obj.scaleX / scale;
                         clone.scaleY = obj.scaleY / scale;
-                    } else {
-                        // Clonar objetos normales (dibujo, líneas, etc)
-                        clone = fabric.util.object.clone(obj);
-                        clone.left /= scale;
-                        clone.top /= scale;
-                        clone.scaleX /= scale;
-                        clone.scaleY /= scale;
                     }
 
                     clone.setCoords();
@@ -359,24 +449,7 @@
             }
         }
 
-        function scrollToMatch(i) {
-            const m = matches[i];
-            const pageDiv = document.getElementById(`page_${m.pageIndex + 1}`);
 
-            // Calcula posición absoluta dentro del contenedor
-            const topPos = pageDiv.offsetTop + m.y - 30; // ajusta -80 para bajar un poco más
-
-            container.scrollTo({
-                top: topPos,
-                behavior: "smooth"
-            });
-
-        }
-
-        function updateCounter() {
-            const el = document.getElementById("matchCounter");
-            el.textContent = matches.length ? `${matches.length} resultado(s)` : "0 resultados";
-        }
 
         // eventos búsqueda
         document.getElementById("btnSearch").addEventListener("click", runSearch);
@@ -388,9 +461,6 @@
             }
         });
 
-        // botones quedan pero no hacen nada
-        document.getElementById("btnPrev").addEventListener("click", prevMatch);
-        document.getElementById("btnNext").addEventListener("click", nextMatch);
 
         function scrollToMatch(i) {
             const m = matches[i];
@@ -400,28 +470,6 @@
                 block: "center"
             });
 
-        }
-
-        function nextMatch() {
-            if (!matches.length) return;
-            currentMatchIndex = (currentMatchIndex + 1) % matches.length;
-            runSearch();
-            scrollToMatch(currentMatchIndex);
-            updateCounter();
-        }
-
-        function prevMatch() {
-            if (!matches.length) return;
-            currentMatchIndex = (currentMatchIndex - 1 + matches.length) % matches.length;
-            runSearch();
-            scrollToMatch(currentMatchIndex);
-            updateCounter();
-        }
-
-        function updateCounter() {
-            const el = document.getElementById("matchCounter");
-            if (!matches.length) el.textContent = "0 resultados";
-            else el.textContent = `${currentMatchIndex+1} / ${matches.length}`;
         }
 
         // eventos búsqueda
