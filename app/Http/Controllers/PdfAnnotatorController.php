@@ -14,14 +14,13 @@ class PdfAnnotatorController extends Controller
 {
     $pdfPath = storage_path('app/public/' . $pdf->path);
 
-    // Obtener tamaño real del PDF usando FPDI
     $fpdi = new Fpdi();
     $fpdi->setSourceFile($pdfPath);
     $tpl = $fpdi->importPage(1);
     $size = $fpdi->getTemplateSize($tpl);
 
-    $pdfWidth = $size['width'];   // puntos PDF
-    $pdfHeight = $size['height']; // puntos PDF
+    $pdfWidth = $size['width'];   
+    $pdfHeight = $size['height']; 
 
     $imagick = new \Imagick();
     $imagick->setResolution(150, 150);
@@ -31,8 +30,7 @@ class PdfAnnotatorController extends Controller
     foreach ($imagick as $i => $page) {
         $page->setImageFormat("png");
         
-        // ✅ IMPORTANTE — usamos la escala PDF real → pixeles
-        $page->scaleImage($pdfWidth * 2, $pdfHeight * 2); // multiplica x2 para buena calidad
+        $page->scaleImage($pdfWidth * 2, $pdfHeight * 2); 
 
         $file = 'tmp/pdf_page_' . $pdf->id . '_' . $i . '.png';
         $fullPath = storage_path('app/public/' . $file);
@@ -57,7 +55,7 @@ class PdfAnnotatorController extends Controller
     ]);
 
     $originalPath = storage_path('app/public/' . $pdf->path);
-    $fpdi = new \setasign\Fpdi\Fpdi();
+    $fpdi = new Fpdi();
     $pageCount = $fpdi->setSourceFile($originalPath);
     $overlayImages = $request->input('overlays');
 
@@ -65,13 +63,9 @@ class PdfAnnotatorController extends Controller
         $tplId = $fpdi->importPage($i + 1);
         $size = $fpdi->getTemplateSize($tplId);
 
-        // crear nueva página con el mismo tamaño
         $fpdi->AddPage($size['orientation'], [$size['width'], $size['height']]);
-
-        // colocar contenido original
         $fpdi->useTemplate($tplId, 0, 0, $size['width'], $size['height']);
 
-        // pegar anotaciones
         if (!empty($overlayImages[$i])) {
             $overlayBase64 = preg_replace('#^data:image/\w+;base64,#i', '', $overlayImages[$i]);
             $overlayImage = base64_decode($overlayBase64);
